@@ -62,7 +62,7 @@ df_1 <- api_construct(budgetCode = "26000000000", year = c(2022,2023), budgetIte
   map_dfr(call_api)
 
 # Read in data across multiple periods and categories
-codes <- read_excel("./data/Open Budget variable types.xlsx")
+codes <- read_excel("./Open Budget variable types.xlsx")
 
 df_m <- codes |> 
   distinct(pick(budgetItem, classificationType)) |> 
