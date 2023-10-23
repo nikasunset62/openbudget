@@ -5,6 +5,7 @@ library(lubridate)
 library(purrr)
 library(plotly)
 library(readxl)
+library(writexl)
 
 # Function to construct api path
 api_construct <- function(budgetCode, 
@@ -56,11 +57,6 @@ call_api <- function(api_path, col_types) {
   return(data_read)
 }
 
-
-# Read in data across multiple periods for a single category
-df_1 <- api_construct(budgetCode = "26000000000", year = c(2022,2023), budgetItem = "INCOMES") |> 
-  map_dfr(call_api)
-
 # Read in data across multiple periods and categories
 codes <- read_excel("./Open Budget variable types.xlsx")
 
@@ -75,29 +71,59 @@ df_m <- codes |>
   mutate(api_path = list(api_construct(budgetCode, budgetItem, classificationType, period, year))) |> 
   mutate(data = list(map_dfr(api_path, call_api)))
 
+# Write data to Excel file
+data_l <- df_m$data
+names(data_l) <- if_else(!is.na(df_m$classificationType),
+                         paste(df_m$budgetItem, df_m$classificationType, sep=", "),
+                         df_m$budgetItem)
+write_xlsx(data_l, "./data_output.xlsx")
 
-# Compare across periods
-(g1 <- df_1 |> 
-  mutate(REP_PERIOD = readr::parse_date(REP_PERIOD, "%m.%Y")) |> 
-  filter(month(REP_PERIOD) == month(max(REP_PERIOD)),  # take latest monthly data, note it's cumulative
-         FUND_TYP == "T") |>   # data for different fund types seems to overlap
-  mutate(category = NAME_INC |> 
-           fct_lump_n(n=7, w = abs(FAKT_AMT)) |> # some FAKT_AMT values are negative, which is probably a typo
-           fct_reorder(abs(FAKT_AMT))
-         ) |> 
-  ggplot(aes(x = format(REP_PERIOD, "%b %Y") |> as.factor(), 
-             y = FAKT_AMT,
-             fill = category)) +
-  geom_col(position = "stack") +
-  scale_y_continuous(labels = scales::label_comma(0.1, scale = 1e-9)) +
-  labs(x = "", y = "UAH billion",
-       title = "Kyiv budget income comparison 2023 vs 2022, ",
-       caption = "Data: Open budget") +
-  theme(legend.position = "none")
-)
+# Summarise the data 
+inc <- data_l$INCOMES|>
+  mutate(TYPE = cut(COD_INCO, 
+                       breaks = c(0,19999999,29999999,39999999,60000000),
+                       labels = c("Tax","Non-tax","Cap_rev","Transfers")),
+         REP_PERIOD = readr::parse_date(REP_PERIOD, "%m.%Y")) |> 
+  filter(month(REP_PERIOD) %in% c(month(max(REP_PERIOD)),12),
+         FUND_TYP == "T")|>
+  group_by(TYPE,REP_PERIOD)%>%
+  summarise(FAKT_AMT=sum(FAKT_AMT),ZAT_AMT=sum(ZAT_AMT))
 
-ggplotly(g1)  
-
+exp <- data_l$`EXPENSES, ECONOMIC`|>
+  mutate(TYPE = cut(COD_CONS_EK, 
+              breaks = c(0,2280,2281,2399,2421,2999,8999,9001),
+              labels = c("Opex","Capex","Opex","Interest","Opex","Capex","Opex")),
+         REP_PERIOD = readr::parse_date(REP_PERIOD, "%m.%Y"))|> 
+  filter(month(REP_PERIOD) %in% c(month(max(REP_PERIOD)),12),
+         FUND_TYP == "T")|>
+  group_by(TYPE,REP_PERIOD)%>%
+  summarise(FAKT_AMT=sum(FAKT_AMT),ZAT_AMT=sum(ZAT_AMT))
 
 
+fin <- data_l$FINANCING_DEBTS%>%
+  mutate(TYPE=if_else(COD_FINA==401000, {"New Borrowing"},
+                      if_else(COD_FINA==402000,"Debt Repayments",
+                      if_else(COD_FINA==602300,"Interbudget loans","NA"))),
+         REP_PERIOD = readr::parse_date(REP_PERIOD, "%m.%Y"))|> 
+  filter(month(REP_PERIOD) %in% c(month(max(REP_PERIOD)),12),
+         FUND_TYP == "T")|>
+  group_by(TYPE,REP_PERIOD)%>% 
+  summarise(FAKT_AMT=sum(FAKT_AMT),ZAT_AMT=sum(ZAT_AMT))
+
+credit
+
+
+cut(COD_CONS_EK, 
+    breaks = c(0,2280,2281,2399,2399,2400,2999,8999,9001),
+    labels = c("Opex","Capex1","Opex1","Interest","Opex2","Capex2","Opex3"))),
+cut(COD_CONS_EK, 
+    breaks = c(0,2999,9001),
+    labels = c("Opex","Capex")))
+
+
+
+
+
+         
+         
 
